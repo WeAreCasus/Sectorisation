@@ -17,4 +17,5 @@ selenium
 webdriver-manager
 streamlit-folium
 shapely
-#test
+requests
+docker

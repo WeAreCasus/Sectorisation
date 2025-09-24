@@ -10,6 +10,10 @@ from streamlit_option_menu import option_menu
 from geopy.geocoders import Nominatim
 from db_connection import get_connection
 import plotly.express as px
+from utils.osrm_client import osrm_client
+from utils.multi_criteria import multi_criteria_optimizer
+from utils.performance import load_managers_optimized, load_stores_optimized
+from utils.monaco_integration import monaco_geocoder
 
 st.logo("LOGO.png", icon_image="Logom.png")
 
@@ -77,10 +81,26 @@ def calculate_new_charge(stores, managers):
     charge_per_sector_new = pd.merge(temps_clientele_per_sector_new, managers[['Code_secteur', 'Nb_jour_terrain_par_an', 'Nb_heure_par_jour']], on='Code_secteur', how='left')
     charge_per_sector_new['Temps terrain effectif'] = charge_per_sector_new['Nb_jour_terrain_par_an'] * charge_per_sector_new['Nb_heure_par_jour'] * 60
 
-    temps_route = 25000
-
-    charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'] + temps_route) / charge_per_sector_new['Temps terrain effectif']) * 100
-    return charge_per_sector_new[['Code_secteur', 'New_Charge']] 
+    def calculate_sector_travel_time(sector_code):
+        sector_stores = stores[stores['Code_secteur'] == sector_code]
+        sector_manager = managers[managers['Code_secteur'] == sector_code]
+        
+        if sector_stores.empty or sector_manager.empty:
+            return 25000  # fallback
+        
+        manager_coords = (sector_manager.iloc[0]['Longitude'], sector_manager.iloc[0]['Latitude'])
+        total_travel_time = 0
+        
+        for _, store in sector_stores.iterrows():
+            store_coords = (store['long'], store['lat'])
+            travel_time = osrm_client.get_travel_time_minutes(manager_coords, store_coords)
+            total_travel_time += travel_time * store.get('Frequence', 1)
+        
+        return total_travel_time * 60  # convert to seconds
+    
+    charge_per_sector_new['temps_route'] = charge_per_sector_new['Code_secteur'].apply(calculate_sector_travel_time)
+    charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'] + charge_per_sector_new['temps_route']) / charge_per_sector_new['Temps terrain effectif']) * 100
+    return charge_per_sector_new[['Code_secteur', 'New_Charge']]
 
 # Fonction de style pour colorer la colonne 'Charge'
 def color_charge(val):
@@ -172,10 +192,28 @@ with col1:
         target_per_manager = stores.shape[0] // num_clusters
 
         def find_nearest_manager(cluster_centroid, managers):
-            distances = cdist([cluster_centroid], managers[['Latitude', 'Longitude']])
-            nearest_manager_idx = distances.argmin()
-            manager = managers.iloc[nearest_manager_idx]
-            return pd.Series([manager['Code_secteur'], manager['Latitude'], manager['Longitude']],
+            best_manager = None
+            best_score = -1
+            
+            for _, manager in managers.iterrows():
+                manager_coords = (manager['Longitude'], manager['Latitude'])
+                store_coords = (cluster_centroid[1], cluster_centroid[0])  # lon, lat for OSRM
+                
+                travel_time = osrm_client.get_travel_time_minutes(manager_coords, store_coords)
+                score = max(0, 1 - (travel_time / 180))  # normalize by 3 hours max
+                
+                if score > best_score:
+                    best_score = score
+                    best_manager = manager
+            
+            if best_manager is not None:
+                return pd.Series([best_manager['Code_secteur'], best_manager['Latitude'], best_manager['Longitude']],
+                                index=['Code_secteur', 'Manager Latitude', 'Manager Longitude'])
+            else:
+                distances = cdist([cluster_centroid], managers[['Latitude', 'Longitude']])
+                nearest_manager_idx = distances.argmin()
+                manager = managers.iloc[nearest_manager_idx]
+                return pd.Series([manager['Code_secteur'], manager['Latitude'], manager['Longitude']],
                                 index=['Code_secteur', 'Manager Latitude', 'Manager Longitude'])
         stores[['Code_secteur', 'Manager Latitude', 'Manager Longitude']] = stores.apply(
             lambda x: find_nearest_manager((x['lat'], x['long']), managers), axis=1, result_type='expand')
@@ -434,7 +472,25 @@ with col2:
             )
 
             merged['Temps terrain effectif'] = merged['Nb_jour_terrain_par_an'] * merged['Nb_heure_par_jour'] * 60
-            merged['New_Charge'] = ((merged['Temps_clientèle'] + 25000) / merged['Temps terrain effectif']) * 100
+            def calculate_sector_travel_time(sector_code):
+                sector_stores = stores_df[stores_df['Code_secteur'] == sector_code]
+                sector_manager = managers_df[managers_df['Code_secteur'] == sector_code]
+                
+                if sector_stores.empty or sector_manager.empty:
+                    return 25000  # fallback
+                
+                manager_coords = (sector_manager.iloc[0]['Longitude'], sector_manager.iloc[0]['Latitude'])
+                total_travel_time = 0
+                
+                for _, store in sector_stores.iterrows():
+                    store_coords = (store['long'], store['lat'])
+                    travel_time = osrm_client.get_travel_time_minutes(manager_coords, store_coords)
+                    total_travel_time += travel_time * store.get('Frequence', 1)
+                
+                return total_travel_time * 60  # convert to seconds
+            
+            merged['temps_route'] = merged['Code_secteur'].apply(calculate_sector_travel_time)
+            merged['New_Charge'] = ((merged['Temps_clientèle'] + merged['temps_route']) / merged['Temps terrain effectif']) * 100
 
             return merged[['Code_secteur', 'New_Charge']]
 
