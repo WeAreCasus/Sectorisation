@@ -12,6 +12,7 @@ from utils.osrm_client import osrm_client
 from utils.multi_criteria import multi_criteria_optimizer
 from utils.territory_boundaries import territory_manager
 from utils.performance import load_managers_optimized, load_stores_optimized, performance_optimizer
+from utils.csv_data_loader import load_managers_from_csv, load_stores_from_csv, is_csv_mode_available
 
 # Configuration initiale de la page
 #st.set_page_config(page_title="Analyse Sectorielle", layout="wide")
@@ -28,6 +29,10 @@ st.logo("LOGO.png", icon_image="Logom.png")
 #         return df
 #     return pd.DataFrame()
 def load_managers_from_db():
+    if is_csv_mode_available():
+        st.info("🧪 Testing mode: Using CSV data instead of database")
+        return load_managers_from_csv()
+    
     conn = get_connection()
     if conn:
         try:
@@ -54,6 +59,10 @@ def load_managers_from_db():
 #     return pd.DataFrame()
 
 def load_stores_from_db():
+    if is_csv_mode_available():
+        st.info("🧪 Testing mode: Using generated store data for testing")
+        return load_stores_from_csv()
+    
     conn = get_connection()
     if conn:
         cursor = conn.cursor()
@@ -209,7 +218,7 @@ stores_per_sector = stores.groupby('Code_secteur').size().reset_index(name='Nomb
 total_stores = stores_per_sector['Nombre de magasins'].sum()
 
 # Calculer le CA potentiel par secteur
-ca_potentiel_per_sector = stores.groupby('Code_secteur')['Potentiel'].sum().reset_index(name='CA Potentiel')
+ca_potentiel_per_sector = stores.groupby('Code_secteur')['CA_potentiel'].sum().reset_index(name='CA Potentiel')
 # total_ca_potentiel = ca_potentiel_per_sector['CA Potentiel'].sum()
 total_ca_potentiel = float(ca_potentiel_per_sector['CA Potentiel'].sum())
 
@@ -219,7 +228,7 @@ total_ca_potentiel = float(ca_potentiel_per_sector['CA Potentiel'].sum())
 # temps_clientele_per_sector = stores.groupby('Code_secteur').apply(lambda x: (x['Temps'] * x['Frequence']).sum()).reset_index(name='Temps passé clientèle')
 # TEST DEPLOIEMENT 
 temps_clientele_per_sector = stores.copy()
-temps_clientele_per_sector['Poids'] = temps_clientele_per_sector['Temps'] * temps_clientele_per_sector['Frequence']
+temps_clientele_per_sector['Poids'] = temps_clientele_per_sector['Temps_clientele'] * temps_clientele_per_sector['Frequence']
 temps_clientele_per_sector = temps_clientele_per_sector.groupby('Code_secteur')['Poids'].sum().reset_index(name='Temps passé clientèle')
 ###############
 # st.write("Colonnes managers :", managers.columns.tolist())
@@ -391,10 +400,10 @@ with left_column:
 
     visits_needed = filtered_stores['Frequence'].sum()
     stores_needed = filtered_stores.shape[0]
-    ca_potentiel_needed = filtered_stores['Potentiel'].sum()
+    ca_potentiel_needed = filtered_stores['CA_potentiel'].sum()
     commercials_needed = filtered_managers.shape[0]
 
-    temp_client = (filtered_stores['Temps'] * filtered_stores['Frequence']).sum()
+    temp_client = (filtered_stores['Temps_clientele'] * filtered_stores['Frequence']).sum()
     temp_terrain = (filtered_managers['Nb_jour_terrain_par_an'] * filtered_managers['Nb_heure_par_jour'] * 60).sum()
     charge_needed = ((temp_client + 25000) / temp_terrain) * 100 if temp_terrain > 0 else 0
 
@@ -547,7 +556,7 @@ with left_column:
                 color=sector_color,
                 fill=True,
                 fill_color=sector_color,
-                popup=f"Store ID: {store['Code_mag']} - Sector: {sector}"
+                popup=f"Store ID: {store['id']} - Sector: {sector}"
             ).add_to(map)
 
             # Draw line to manager if manager exists for this sector
@@ -591,11 +600,11 @@ with right_column:
         stores = stores.copy()
 
         # Forcer la conversion en float si jamais l'import a mis du texte
-        stores['Temps'] = pd.to_numeric(stores['Temps'], errors='coerce')
+        stores['Temps_clientele'] = pd.to_numeric(stores['Temps_clientele'], errors='coerce')
         stores['Frequence'] = pd.to_numeric(stores['Frequence'], errors='coerce')
 
         # Calcul du poids
-        stores['Poids'] = stores['Temps'] * stores['Frequence']
+        stores['Poids'] = stores['Temps_clientele'] * stores['Frequence']
 
         # Agrégation par secteur
         temps_clientele_per_sector_new = stores.groupby('Code_secteur')['Poids'].sum().reset_index(name='New_Temps passé clientèle')
@@ -631,7 +640,7 @@ with right_column:
     st.session_state.managers_optimized = pd.merge(managers, optimized_visits_per_sector, on='Code_secteur', how='left', suffixes=('', '_new'))
     st.session_state.managers_optimized['New_Visites nécessaires'].fillna(0, inplace=True)
 
-    optimized_ca_potentiel_per_sector = stores.groupby('Code_secteur')['Potentiel'].sum().reset_index(name='New_CA Potentiel')
+    optimized_ca_potentiel_per_sector = stores.groupby('Code_secteur')['CA_potentiel'].sum().reset_index(name='New_CA Potentiel')
     st.session_state.managers_optimized = pd.merge(st.session_state.managers_optimized, optimized_ca_potentiel_per_sector, on='Code_secteur', how='left', suffixes=('', '_new'))
     st.session_state.managers_optimized['New_CA Potentiel'].fillna(0, inplace=True)
 
@@ -830,7 +839,7 @@ with right_column:
                 color=sector_color,
                 fill=True,
                 fill_color=sector_color,
-                popup=f"Store ID: {row['Code_mag']} - Sector: {row['Code_secteur']}"
+                popup=f"Store ID: {row['id']} - Sector: {row['Code_secteur']}"
             ).add_to(map)
             folium.PolyLine(
                 locations=[[row['Manager Latitude'], row['Manager Longitude']], [row['lat'], row['long']]],
