@@ -14,6 +14,7 @@ from utils.osrm_client import osrm_client
 from utils.multi_criteria import multi_criteria_optimizer
 from utils.performance import load_managers_optimized, load_stores_optimized
 from utils.monaco_integration import monaco_geocoder
+from utils.csv_data_loader import is_csv_mode_available, load_managers_from_csv, load_stores_from_csv
 
 st.logo("LOGO.png", icon_image="Logom.png")
 
@@ -39,6 +40,11 @@ def load_managers_from_db():
         except Exception as e:
             print(f"Erreur lors du chargement de la table RH : {e}")
             conn.close()
+    
+    if is_csv_mode_available():
+        st.info("🔄 Testing mode: Using CSV data instead of database")
+        return load_managers_from_csv()
+    
     return pd.DataFrame()
 
 # def load_stores_from_db():
@@ -59,6 +65,11 @@ def load_stores_from_db():
         cursor.close()
         conn.close()
         return df
+    
+    if is_csv_mode_available():
+        st.info("🔄 Testing mode: Using generated store data for testing")
+        return load_stores_from_csv()
+    
     return pd.DataFrame()
 
 # Charger les données
@@ -248,7 +259,7 @@ with col1:
                     color=sector_color,
                     fill=True,
                     fill_color=sector_color,
-                    popup=f"Store ID: {row['Code_mag']} - Sector: {row['Code_secteur']}"
+                    popup=f"Store ID: {row['id']} - Sector: {row['Code_secteur']}"
                 ).add_to(map)
                 folium.PolyLine(
                     locations=[[row['Manager Latitude'], row['Manager Longitude']], [row['lat'], row['long']]],
@@ -340,7 +351,7 @@ with col1:
                     color=sector_color,
                     fill=True,
                     fill_color=sector_color,
-                    popup=f"Store ID: {row['Code_mag']} - Sector: {row['Code_secteur']}"
+                    popup=f"Store ID: {row['id']} - Sector: {row['Code_secteur']}"
                 ).add_to(modified_map)
 
                 # Vérifier que la ligne est tracée uniquement vers le secteur actuel du magasin
