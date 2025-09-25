@@ -8,9 +8,14 @@ import streamlit as st
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex, ListedColormap
 from db_connection import get_connection
+from utils.osrm_client import osrm_client
+from utils.multi_criteria import multi_criteria_optimizer
+from utils.territory_boundaries import territory_manager
+from utils.performance import load_managers_optimized, load_stores_optimized, performance_optimizer
+from utils.csv_data_loader import load_managers_from_csv, load_stores_from_csv, is_csv_mode_available
 
 # Configuration initiale de la page
-#st.set_page_config(page_title="Analyse Sectorielle", layout="wide")
+st.set_page_config(page_title="Analyse Sectorielle", layout="wide")
 
 st.markdown("<div class='title'><b>Tableau de Bord - Analyse et Bilan de la Performance</b></div>", unsafe_allow_html=True)
 st.logo("LOGO.png", icon_image="Logom.png")
@@ -34,10 +39,16 @@ def load_managers_from_db():
             df = pd.DataFrame(data, columns=columns)
             cursor.close()
             conn.close()
-            return df
+            if not df.empty:
+                return df
         except Exception as e:
             print(f"Erreur lors du chargement de la table RH : {e}")
             conn.close()
+    
+    if is_csv_mode_available():
+        st.info("🧪 Testing mode: Using CSV data instead of database")
+        return load_managers_from_csv()
+    
     return pd.DataFrame()
 
 
@@ -52,14 +63,24 @@ def load_managers_from_db():
 def load_stores_from_db():
     conn = get_connection()
     if conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM pdv")
-        columns = [col[0] for col in cursor.description]
-        data = cursor.fetchall()
-        df = pd.DataFrame(data, columns=columns)
-        cursor.close()
-        conn.close()
-        return df
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM pdv")
+            columns = [col[0] for col in cursor.description]
+            data = cursor.fetchall()
+            df = pd.DataFrame(data, columns=columns)
+            cursor.close()
+            conn.close()
+            if not df.empty:
+                return df
+        except Exception as e:
+            print(f"Erreur lors du chargement de la table PDV : {e}")
+            conn.close()
+    
+    if is_csv_mode_available():
+        st.info("🧪 Testing mode: Using generated store data for testing")
+        return load_stores_from_csv()
+    
     return pd.DataFrame()
 
 managers_original = load_managers_from_db()
@@ -225,13 +246,13 @@ temps_terrain_effectif_per_manager = (managers['Nb_jour_terrain_par_an'] * manag
 
 # Jointure des données calculées pour le calcul de la charge
 charge_per_sector = pd.merge(temps_clientele_per_sector, managers[['Code_secteur', 'Nb_jour_terrain_par_an', 'Nb_heure_par_jour']], on='Code_secteur', how='left')
-charge_per_sector['Temps terrain effectif'] = charge_per_sector['Nb_jour_terrain_par_an'] * charge_per_sector['Nb_heure_par_jour'] * 60
+charge_per_sector['Temps terrain effectif'] = charge_per_sector['Nb_jour_terrain_par_an'].astype(float) * charge_per_sector['Nb_heure_par_jour'].astype(float) * 60
 
 # Ajout du temps passé sur la route
 temps_route = 25000
 
 # Calcul de la charge pour chaque secteur
-charge_per_sector['Charge'] = ((charge_per_sector['Temps passé clientèle'] + temps_route)/ charge_per_sector['Temps terrain effectif'])* 100
+charge_per_sector['Charge'] = ((charge_per_sector['Temps passé clientèle'].astype(float) + temps_route) / charge_per_sector['Temps terrain effectif'].astype(float)) * 100
 
 # Streamlit UI
 # Préparation de l'interface utilisateur
@@ -511,7 +532,7 @@ with left_column:
         # Default color for sectors without managers
         default_color = "#808080"  # Gray
 
-        # Map visualization
+        # Map visualization with Monaco support
         map = folium.Map(location=[46.2276, 2.2137], zoom_start=7, tiles=None)
         plugins.Fullscreen(position='topright', force_separate_button=True).add_to(map)
         folium.TileLayer(
@@ -526,6 +547,11 @@ with left_column:
             attr='© OpenStreetMap contributors'
         ).add_to(map)
 
+        if not filtered_managers.empty:
+            territories = territory_manager.create_voronoi_territories(filtered_managers)
+            resolved_territories = territory_manager.resolve_overlaps(territories, filtered_stores)
+            map = territory_manager.add_territories_to_map(map, resolved_territories, sector_to_color)
+        
         # Ajouter le contrôle de couche
         folium.LayerControl().add_to(map)            
         
@@ -593,11 +619,29 @@ with right_column:
         # temps_clientele_per_sector_new = stores.groupby('Code_secteur').apply(lambda x: (x['Temps'] * x['Frequence']).sum()).reset_index(name='New_Temps passé clientèle')
 
         charge_per_sector_new = pd.merge(temps_clientele_per_sector_new, managers[['Code_secteur', 'Nb_jour_terrain_par_an', 'Nb_heure_par_jour']], on='Code_secteur', how='left')
-        charge_per_sector_new['Temps terrain effectif'] = charge_per_sector_new['Nb_jour_terrain_par_an'] * charge_per_sector_new['Nb_heure_par_jour'] * 60
+        charge_per_sector_new['Temps terrain effectif'] = charge_per_sector_new['Nb_jour_terrain_par_an'].astype(float) * charge_per_sector_new['Nb_heure_par_jour'].astype(float) * 60
 
-        temps_route = 25000
+        # Calculate dynamic travel times using OSRM
+        def calculate_sector_travel_time(sector_code):
+            sector_stores = stores[stores['Code_secteur'] == sector_code]
+            sector_manager = managers[managers['Code_secteur'] == sector_code]
+            
+            if sector_stores.empty or sector_manager.empty:
+                return 25000  # fallback to old fixed value
+            
+            manager_coords = (sector_manager.iloc[0]['Longitude'], sector_manager.iloc[0]['Latitude'])
+            total_travel_time = 0
+            
+            for _, store in sector_stores.iterrows():
+                store_coords = (store['long'], store['lat'])
+                travel_time = osrm_client.get_travel_time_minutes(manager_coords, store_coords)
+                total_travel_time += travel_time * store.get('Frequence', 1)
+            
+            return total_travel_time * 60  # convert to seconds
+        
+        charge_per_sector_new['temps_route'] = charge_per_sector_new['Code_secteur'].apply(calculate_sector_travel_time)
 
-        charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'] + temps_route) / charge_per_sector_new['Temps terrain effectif']) * 100
+        charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'].astype(float) + charge_per_sector_new['temps_route'].astype(float)) / charge_per_sector_new['Temps terrain effectif'].astype(float)) * 100
         return charge_per_sector_new[['Code_secteur', 'New_Charge']]    
     # Nouveau calcul des visites après optimisation
     optimized_visits_per_sector = stores.groupby('Code_secteur')['Frequence'].sum().reset_index(name='New_Visites nécessaires')
@@ -727,11 +771,31 @@ with right_column:
             st.error("Aucun manager n'est disponible. Impossible d'attribuer les secteurs.")
 
         def find_nearest_manager(cluster_centroid, managers):
-            distances = cdist([cluster_centroid], managers[['Latitude', 'Longitude']])
-            nearest_manager_idx = distances.argmin()
-            manager = managers.iloc[nearest_manager_idx]
-            return pd.Series([manager['Code_secteur'], manager['Latitude'], manager['Longitude']],
-                            index=['Code_secteur', 'Manager Latitude', 'Manager Longitude'])
+            best_manager = None
+            best_score = -1
+            
+            for _, manager in managers.iterrows():
+                # Calculate OSRM-based travel time
+                manager_coords = (manager['Longitude'], manager['Latitude'])
+                store_coords = (cluster_centroid[1], cluster_centroid[0])  # lon, lat for OSRM
+                
+                travel_time = osrm_client.get_travel_time_minutes(manager_coords, store_coords)
+                
+                score = max(0, 1 - (travel_time / 180))  # normalize by 3 hours max
+                
+                if score > best_score:
+                    best_score = score
+                    best_manager = manager
+            
+            if best_manager is not None:
+                return pd.Series([best_manager['Code_secteur'], best_manager['Latitude'], best_manager['Longitude']],
+                                index=['Code_secteur', 'Manager Latitude', 'Manager Longitude'])
+            else:
+                distances = cdist([cluster_centroid], managers[['Latitude', 'Longitude']])
+                nearest_manager_idx = distances.argmin()
+                manager = managers.iloc[nearest_manager_idx]
+                return pd.Series([manager['Code_secteur'], manager['Latitude'], manager['Longitude']],
+                                index=['Code_secteur', 'Manager Latitude', 'Manager Longitude'])
 
         # Vérification avant le .apply()
         if stores.empty:
@@ -858,7 +922,35 @@ else:
     )
 
 charge_calc['Temps terrain effectif'] = charge_calc['Nb_jour_terrain_par_an'] * charge_calc['Nb_heure_par_jour'] * 60
-charge_calc['Charge'] = ((charge_calc['Temps passé clientèle'] + 25000) / charge_calc['Temps terrain effectif']) * 100
+
+# Calculate dynamic travel times for each sector
+def calculate_sector_travel_time_optimized(sector_code):
+    cache_key = f"travel_time_{sector_code}"
+    cached_result = performance_optimizer.get_cached_data(cache_key)
+    if cached_result is not None:
+        return cached_result
+    
+    sector_stores = stores[stores['Code_secteur'] == sector_code]
+    sector_manager = managers_clean[managers_clean['Code_secteur'] == sector_code]
+    
+    if sector_stores.empty or sector_manager.empty:
+        result = 25000  # fallback
+    else:
+        manager_coords = (sector_manager.iloc[0]['Longitude'], sector_manager.iloc[0]['Latitude'])
+        total_travel_time = 0
+        
+        for _, store in sector_stores.iterrows():
+            store_coords = (store['long'], store['lat'])
+            travel_time = osrm_client.get_travel_time_minutes(manager_coords, store_coords)
+            total_travel_time += travel_time * store.get('Frequence', 1)
+        
+        result = total_travel_time * 60  # convert to seconds
+    
+    performance_optimizer.set_cached_data(cache_key, result)
+    return result
+
+charge_calc['temps_route_dynamique'] = charge_calc['Code_secteur'].apply(calculate_sector_travel_time_optimized)
+charge_calc['Charge'] = ((charge_calc['Temps passé clientèle'].astype(float) + charge_calc['temps_route_dynamique'].astype(float)) / charge_calc['Temps terrain effectif'].astype(float)) * 100
 managers_clean = pd.merge(managers_clean, charge_calc[['Code_secteur', 'Charge']], on='Code_secteur', how='left')
 managers_clean['Charge'] = managers_clean['Charge'].apply(format_charge)
 
