@@ -15,7 +15,7 @@ from utils.performance import load_managers_optimized, load_stores_optimized, pe
 from utils.csv_data_loader import load_managers_from_csv, load_stores_from_csv, is_csv_mode_available
 
 # Configuration initiale de la page
-#st.set_page_config(page_title="Analyse Sectorielle", layout="wide")
+st.set_page_config(page_title="Analyse Sectorielle", layout="wide")
 
 st.markdown("<div class='title'><b>Tableau de Bord - Analyse et Bilan de la Performance</b></div>", unsafe_allow_html=True)
 st.logo("LOGO.png", icon_image="Logom.png")

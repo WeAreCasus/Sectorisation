@@ -17,6 +17,7 @@ from utils.performance import load_managers_optimized, load_stores_optimized
 from utils.monaco_integration import monaco_geocoder
 from utils.csv_data_loader import is_csv_mode_available, load_managers_from_csv, load_stores_from_csv
 
+st.set_page_config(page_title="Gestion RH", layout="wide")
 st.logo("LOGO.png", icon_image="Logom.png")
 
 
