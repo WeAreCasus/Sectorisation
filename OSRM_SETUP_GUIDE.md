@@ -297,8 +297,93 @@ docker start osrm-backend
 - **Cache hit ratio** : > 80% pour optimisation
 - **Utilisation mémoire** : ~2GB pour données Île-de-France
 
+## Scripts de Déploiement Automatisé
+
+### Déploiement Automatique
+
+Le projet inclut un script de déploiement automatisé qui configure l'ensemble du système :
+
+```bash
+# Déploiement complet (recommandé)
+./deploy.sh
+
+# Mode développement (données CSV de test)
+./deploy.sh --dev
+
+# Sans OSRM (temps de trajet fixes)
+./deploy.sh --skip-osrm
+
+# Mode production (configuration MySQL personnalisée)
+./deploy.sh --prod
+```
+
+**Fonctionnalités du script de déploiement :**
+- ✅ Vérification automatique des prérequis (Docker, Python, etc.)
+- ✅ Installation des dépendances Python
+- ✅ Configuration automatique de la base de données MySQL
+- ✅ Téléchargement et préprocessing des données OSM
+- ✅ Démarrage automatique des conteneurs OSRM
+- ✅ Lancement de l'application Streamlit
+- ✅ Vérifications de santé de tous les services
+- ✅ Gestion d'erreurs avec nettoyage automatique
+- ✅ Affichage des informations d'accès et commandes utiles
+
+### Arrêt des Services
+
+Pour arrêter proprement tous les services :
+
+```bash
+# Arrêt normal
+./stop.sh
+
+# Arrêt forcé
+./stop.sh --force
+
+# Arrêter seulement Streamlit (garder OSRM)
+./stop.sh --keep-osrm
+```
+
+**Fonctionnalités du script d'arrêt :**
+- 🛑 Arrêt propre de Streamlit avec gestion des PID
+- 🛑 Arrêt et suppression des conteneurs OSRM
+- 🛑 Libération des ports 8501 et 5000
+- 🛑 Nettoyage des fichiers temporaires
+- 🛑 Archivage automatique des logs
+- 🛑 Vérifications post-arrêt
+
+### Exemples d'Usage
+
+**Installation complète pour production :**
+```bash
+git clone <repository>
+cd Sectorisation
+./deploy.sh --prod
+# Suivre les instructions pour configurer MySQL
+```
+
+**Test rapide en développement :**
+```bash
+./deploy.sh --dev
+# Utilise les données CSV de test
+```
+
+**Redémarrage après modifications :**
+```bash
+./stop.sh
+./deploy.sh
+```
+
+**Maintenance OSRM uniquement :**
+```bash
+./stop.sh --keep-osrm
+# Modifier les données OSM si nécessaire
+./deploy.sh  # Redémarre tout
+```
+
 ## Conclusion
 
 Cette configuration fournit une solution complète de sectorisation avec routage réaliste. L'intégration OSRM améliore significativement la précision des calculs de charge et l'optimisation territoriale par rapport aux calculs de distance euclidienne.
+
+Les scripts de déploiement automatisé simplifient grandement l'installation et la maintenance du système, permettant un déploiement en une seule commande.
 
 Pour toute question ou problème, consultez les logs Docker et Streamlit, ou contactez l'équipe de développement.
