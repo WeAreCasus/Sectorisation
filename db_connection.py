@@ -6,11 +6,11 @@ import pymysql
 def get_connection():
     try:
         conn = pymysql.connect(
-            host=st.secrets["db_host"],
-            port=int(st.secrets["db_port"]),
-            user=st.secrets["db_user"],
-            password=st.secrets["db_password"],
-            database=st.secrets["db_name"],
+            host=st.secrets["connections"]["mysql"]["host"],
+            port=int(st.secrets["connections"]["mysql"]["port"]),
+            user=st.secrets["connections"]["mysql"]["username"],
+            password=st.secrets["connections"]["mysql"]["password"],
+            database=st.secrets["connections"]["mysql"]["database"],
             charset='utf8mb4',
             cursorclass=pymysql.cursors.DictCursor
         )

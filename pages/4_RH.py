@@ -219,7 +219,7 @@ with col1:
                 color=sector_color,
                 fill=True,
                 fill_color=sector_color,
-                popup=f"Store ID: {row['Code_mag']} - Sector: {row['Code_secteur']}"
+                popup=f"Store - Sector: {row['Code_secteur']}"
             ).add_to(map)
             folium.PolyLine(
                 locations=[[row['Manager Latitude'], row['Manager Longitude']], [row['lat'], row['long']]],
@@ -511,7 +511,7 @@ with col2:
                                     color=sector_color,
                                     fill=True,
                                     fill_color=sector_color,
-                                    popup=f"Store ID: {row['Code_mag']} - Sector: {row['Code_secteur']}"
+                                    popup=f"Store - Sector: {row['Code_secteur']}"
                                 ).add_to(updated_map)
                                 folium.PolyLine(
                                     locations=[[row['Manager Latitude'], row['Manager Longitude']], [row['lat'], row['long']]],
