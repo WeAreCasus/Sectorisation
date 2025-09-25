@@ -366,7 +366,7 @@ with col2:
 
         # 🔁 Recalcul PDV affectés & Visites nécessaires
         pdv_visites_df = stores.groupby('Code_secteur').agg(
-            New_PDV_affectés=('Code_mag', 'count'),
+            New_PDV_affectés=('lat', 'count'),
             New_Visites_nécessaires=('Frequence', 'sum')
         ).reset_index()
         pdv_visites_df.columns = ['Code_secteur', 'New_PDV affectés', 'New_Visites nécessaires']
