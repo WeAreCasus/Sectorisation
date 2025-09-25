@@ -38,7 +38,8 @@ def load_managers_from_db():
             df = pd.DataFrame(data, columns=columns)
             cursor.close()
             conn.close()
-            return df
+            if not df.empty:
+                return df
         except Exception as e:
             print(f"Erreur lors du chargement de la table RH : {e}")
             conn.close()
@@ -163,7 +164,7 @@ with col1:
             temps_clientele_per_sector_new = stores.groupby('Code_secteur').apply(lambda x: (x['Temps'] * x['Frequence']).sum()).reset_index(name='New_Temps passé clientèle')
 
             charge_per_sector_new = pd.merge(temps_clientele_per_sector_new, managers[['Code_secteur', 'Nb_jour_terrain_par_an', 'Nb_heure_par_jour']], on='Code_secteur', how='left')
-            charge_per_sector_new['Temps terrain effectif'] = charge_per_sector_new['Nb_jour_terrain_par_an'] * charge_per_sector_new['Nb_heure_par_jour'] * 60
+            charge_per_sector_new['Temps terrain effectif'] = charge_per_sector_new['Nb_jour_terrain_par_an'].astype(float) * charge_per_sector_new['Nb_heure_par_jour'].astype(float) * 60
 
             def calculate_sector_travel_time(sector_code):
                 sector_stores = stores[stores['Code_secteur'] == sector_code]
@@ -184,7 +185,7 @@ with col1:
             
             charge_per_sector_new['temps_route'] = charge_per_sector_new['Code_secteur'].apply(calculate_sector_travel_time)
 
-            charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'] + charge_per_sector_new['temps_route']) / charge_per_sector_new['Temps terrain effectif']) * 100
+            charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'].astype(float) + charge_per_sector_new['temps_route'].astype(float)) / charge_per_sector_new['Temps terrain effectif'].astype(float)) * 100
             return charge_per_sector_new[['Code_secteur', 'New_Charge']]
 
         map = folium.Map(location=[46.2276, 2.2137], zoom_start=7, tiles=None)
@@ -335,7 +336,7 @@ with col2:
                 how='left'
             )
 
-            merged['Temps terrain effectif'] = merged['Nb_jour_terrain_par_an'] * merged['Nb_heure_par_jour'] * 60
+            merged['Temps terrain effectif'] = merged['Nb_jour_terrain_par_an'].astype(float) * merged['Nb_heure_par_jour'].astype(float) * 60
             def calculate_sector_travel_time(sector_code):
                 sector_stores = stores_df[stores_df['Code_secteur'] == sector_code]
                 sector_manager = managers_df[managers_df['Code_secteur'] == sector_code]
@@ -354,7 +355,7 @@ with col2:
                 return total_travel_time * 60  # convert to seconds
             
             merged['temps_route'] = merged['Code_secteur'].apply(calculate_sector_travel_time)
-            merged['New_Charge'] = ((merged['Temps_clientèle'] + merged['temps_route']) / merged['Temps terrain effectif']) * 100
+            merged['New_Charge'] = ((merged['Temps_clientèle'].astype(float) + merged['temps_route'].astype(float)) / merged['Temps terrain effectif'].astype(float)) * 100
             merged['New_Charge'] = merged['New_Charge'].apply(lambda x: f"{x:.2f}%" if pd.notnull(x) else "")
 
             return merged[['Code_secteur', 'New_Charge']]

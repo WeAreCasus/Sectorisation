@@ -75,8 +75,8 @@ def load_stores_from_csv():
                 'lat': manager['Latitude'] + lat_offset,
                 'long': manager['Longitude'] + lon_offset,
                 'Frequence': random.randint(1, 4),
-                'Temps_clientele': random.randint(30, 120),
-                'CA_potentiel': random.randint(10000, 50000),
+                'Temps': random.randint(30, 120),
+                'Potentiel': random.randint(10000, 50000),
                 'Nom_magasin': f"Store_{store_id}",
                 'Ville': manager['Ville']
             }

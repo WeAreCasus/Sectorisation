@@ -29,10 +29,6 @@ st.logo("LOGO.png", icon_image="Logom.png")
 #         return df
 #     return pd.DataFrame()
 def load_managers_from_db():
-    if is_csv_mode_available():
-        st.info("🧪 Testing mode: Using CSV data instead of database")
-        return load_managers_from_csv()
-    
     conn = get_connection()
     if conn:
         try:
@@ -43,10 +39,16 @@ def load_managers_from_db():
             df = pd.DataFrame(data, columns=columns)
             cursor.close()
             conn.close()
-            return df
+            if not df.empty:
+                return df
         except Exception as e:
             print(f"Erreur lors du chargement de la table RH : {e}")
             conn.close()
+    
+    if is_csv_mode_available():
+        st.info("🧪 Testing mode: Using CSV data instead of database")
+        return load_managers_from_csv()
+    
     return pd.DataFrame()
 
 
@@ -59,20 +61,26 @@ def load_managers_from_db():
 #     return pd.DataFrame()
 
 def load_stores_from_db():
+    conn = get_connection()
+    if conn:
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM pdv")
+            columns = [col[0] for col in cursor.description]
+            data = cursor.fetchall()
+            df = pd.DataFrame(data, columns=columns)
+            cursor.close()
+            conn.close()
+            if not df.empty:
+                return df
+        except Exception as e:
+            print(f"Erreur lors du chargement de la table PDV : {e}")
+            conn.close()
+    
     if is_csv_mode_available():
         st.info("🧪 Testing mode: Using generated store data for testing")
         return load_stores_from_csv()
     
-    conn = get_connection()
-    if conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM pdv")
-        columns = [col[0] for col in cursor.description]
-        data = cursor.fetchall()
-        df = pd.DataFrame(data, columns=columns)
-        cursor.close()
-        conn.close()
-        return df
     return pd.DataFrame()
 
 managers_original = load_managers_from_db()
@@ -218,7 +226,7 @@ stores_per_sector = stores.groupby('Code_secteur').size().reset_index(name='Nomb
 total_stores = stores_per_sector['Nombre de magasins'].sum()
 
 # Calculer le CA potentiel par secteur
-ca_potentiel_per_sector = stores.groupby('Code_secteur')['CA_potentiel'].sum().reset_index(name='CA Potentiel')
+ca_potentiel_per_sector = stores.groupby('Code_secteur')['Potentiel'].sum().reset_index(name='CA Potentiel')
 # total_ca_potentiel = ca_potentiel_per_sector['CA Potentiel'].sum()
 total_ca_potentiel = float(ca_potentiel_per_sector['CA Potentiel'].sum())
 
@@ -228,7 +236,7 @@ total_ca_potentiel = float(ca_potentiel_per_sector['CA Potentiel'].sum())
 # temps_clientele_per_sector = stores.groupby('Code_secteur').apply(lambda x: (x['Temps'] * x['Frequence']).sum()).reset_index(name='Temps passé clientèle')
 # TEST DEPLOIEMENT 
 temps_clientele_per_sector = stores.copy()
-temps_clientele_per_sector['Poids'] = temps_clientele_per_sector['Temps_clientele'] * temps_clientele_per_sector['Frequence']
+temps_clientele_per_sector['Poids'] = temps_clientele_per_sector['Temps'] * temps_clientele_per_sector['Frequence']
 temps_clientele_per_sector = temps_clientele_per_sector.groupby('Code_secteur')['Poids'].sum().reset_index(name='Temps passé clientèle')
 ###############
 # st.write("Colonnes managers :", managers.columns.tolist())
@@ -238,13 +246,13 @@ temps_terrain_effectif_per_manager = (managers['Nb_jour_terrain_par_an'] * manag
 
 # Jointure des données calculées pour le calcul de la charge
 charge_per_sector = pd.merge(temps_clientele_per_sector, managers[['Code_secteur', 'Nb_jour_terrain_par_an', 'Nb_heure_par_jour']], on='Code_secteur', how='left')
-charge_per_sector['Temps terrain effectif'] = charge_per_sector['Nb_jour_terrain_par_an'] * charge_per_sector['Nb_heure_par_jour'] * 60
+charge_per_sector['Temps terrain effectif'] = charge_per_sector['Nb_jour_terrain_par_an'].astype(float) * charge_per_sector['Nb_heure_par_jour'].astype(float) * 60
 
 # Ajout du temps passé sur la route
 temps_route = 25000
 
 # Calcul de la charge pour chaque secteur
-charge_per_sector['Charge'] = ((charge_per_sector['Temps passé clientèle'] + temps_route)/ charge_per_sector['Temps terrain effectif'])* 100
+charge_per_sector['Charge'] = ((charge_per_sector['Temps passé clientèle'].astype(float) + temps_route) / charge_per_sector['Temps terrain effectif'].astype(float)) * 100
 
 # Streamlit UI
 # Préparation de l'interface utilisateur
@@ -400,10 +408,10 @@ with left_column:
 
     visits_needed = filtered_stores['Frequence'].sum()
     stores_needed = filtered_stores.shape[0]
-    ca_potentiel_needed = filtered_stores['CA_potentiel'].sum()
+    ca_potentiel_needed = filtered_stores['Potentiel'].sum()
     commercials_needed = filtered_managers.shape[0]
 
-    temp_client = (filtered_stores['Temps_clientele'] * filtered_stores['Frequence']).sum()
+    temp_client = (filtered_stores['Temps'] * filtered_stores['Frequence']).sum()
     temp_terrain = (filtered_managers['Nb_jour_terrain_par_an'] * filtered_managers['Nb_heure_par_jour'] * 60).sum()
     charge_needed = ((temp_client + 25000) / temp_terrain) * 100 if temp_terrain > 0 else 0
 
@@ -556,7 +564,7 @@ with left_column:
                 color=sector_color,
                 fill=True,
                 fill_color=sector_color,
-                popup=f"Store ID: {store['id']} - Sector: {sector}"
+                popup=f"Store ID: {store['Code_mag']} - Sector: {sector}"
             ).add_to(map)
 
             # Draw line to manager if manager exists for this sector
@@ -600,18 +608,18 @@ with right_column:
         stores = stores.copy()
 
         # Forcer la conversion en float si jamais l'import a mis du texte
-        stores['Temps_clientele'] = pd.to_numeric(stores['Temps_clientele'], errors='coerce')
+        stores['Temps'] = pd.to_numeric(stores['Temps'], errors='coerce')
         stores['Frequence'] = pd.to_numeric(stores['Frequence'], errors='coerce')
 
         # Calcul du poids
-        stores['Poids'] = stores['Temps_clientele'] * stores['Frequence']
+        stores['Poids'] = stores['Temps'] * stores['Frequence']
 
         # Agrégation par secteur
         temps_clientele_per_sector_new = stores.groupby('Code_secteur')['Poids'].sum().reset_index(name='New_Temps passé clientèle')
         # temps_clientele_per_sector_new = stores.groupby('Code_secteur').apply(lambda x: (x['Temps'] * x['Frequence']).sum()).reset_index(name='New_Temps passé clientèle')
 
         charge_per_sector_new = pd.merge(temps_clientele_per_sector_new, managers[['Code_secteur', 'Nb_jour_terrain_par_an', 'Nb_heure_par_jour']], on='Code_secteur', how='left')
-        charge_per_sector_new['Temps terrain effectif'] = charge_per_sector_new['Nb_jour_terrain_par_an'] * charge_per_sector_new['Nb_heure_par_jour'] * 60
+        charge_per_sector_new['Temps terrain effectif'] = charge_per_sector_new['Nb_jour_terrain_par_an'].astype(float) * charge_per_sector_new['Nb_heure_par_jour'].astype(float) * 60
 
         # Calculate dynamic travel times using OSRM
         def calculate_sector_travel_time(sector_code):
@@ -633,14 +641,14 @@ with right_column:
         
         charge_per_sector_new['temps_route'] = charge_per_sector_new['Code_secteur'].apply(calculate_sector_travel_time)
 
-        charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'] + charge_per_sector_new['temps_route']) / charge_per_sector_new['Temps terrain effectif']) * 100
+        charge_per_sector_new['New_Charge'] = ((charge_per_sector_new['New_Temps passé clientèle'].astype(float) + charge_per_sector_new['temps_route'].astype(float)) / charge_per_sector_new['Temps terrain effectif'].astype(float)) * 100
         return charge_per_sector_new[['Code_secteur', 'New_Charge']]    
     # Nouveau calcul des visites après optimisation
     optimized_visits_per_sector = stores.groupby('Code_secteur')['Frequence'].sum().reset_index(name='New_Visites nécessaires')
     st.session_state.managers_optimized = pd.merge(managers, optimized_visits_per_sector, on='Code_secteur', how='left', suffixes=('', '_new'))
     st.session_state.managers_optimized['New_Visites nécessaires'].fillna(0, inplace=True)
 
-    optimized_ca_potentiel_per_sector = stores.groupby('Code_secteur')['CA_potentiel'].sum().reset_index(name='New_CA Potentiel')
+    optimized_ca_potentiel_per_sector = stores.groupby('Code_secteur')['Potentiel'].sum().reset_index(name='New_CA Potentiel')
     st.session_state.managers_optimized = pd.merge(st.session_state.managers_optimized, optimized_ca_potentiel_per_sector, on='Code_secteur', how='left', suffixes=('', '_new'))
     st.session_state.managers_optimized['New_CA Potentiel'].fillna(0, inplace=True)
 
@@ -839,7 +847,7 @@ with right_column:
                 color=sector_color,
                 fill=True,
                 fill_color=sector_color,
-                popup=f"Store ID: {row['id']} - Sector: {row['Code_secteur']}"
+                popup=f"Store ID: {row['Code_mag']} - Sector: {row['Code_secteur']}"
             ).add_to(map)
             folium.PolyLine(
                 locations=[[row['Manager Latitude'], row['Manager Longitude']], [row['lat'], row['long']]],
@@ -942,7 +950,7 @@ def calculate_sector_travel_time_optimized(sector_code):
     return result
 
 charge_calc['temps_route_dynamique'] = charge_calc['Code_secteur'].apply(calculate_sector_travel_time_optimized)
-charge_calc['Charge'] = ((charge_calc['Temps passé clientèle'] + charge_calc['temps_route_dynamique']) / charge_calc['Temps terrain effectif']) * 100
+charge_calc['Charge'] = ((charge_calc['Temps passé clientèle'].astype(float) + charge_calc['temps_route_dynamique'].astype(float)) / charge_calc['Temps terrain effectif'].astype(float)) * 100
 managers_clean = pd.merge(managers_clean, charge_calc[['Code_secteur', 'Charge']], on='Code_secteur', how='left')
 managers_clean['Charge'] = managers_clean['Charge'].apply(format_charge)
 
